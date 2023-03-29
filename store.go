@@ -3,12 +3,14 @@ package raft_badgerdb
 import (
 	"encoding/binary"
 	"errors"
-	badger "github.com/dgraph-io/badger/v4"
+	"math"
+	"strconv"
+	"time"
+
+	"github.com/dgraph-io/badger/v4"
 	. "github.com/fuyao-w/common-util"
 	raft "github.com/fuyao-w/go-raft"
 	"github.com/vmihailenco/msgpack/v5"
-	"math"
-	"strconv"
 )
 
 var (
@@ -16,10 +18,10 @@ var (
 	kvNameSpaceLen  = len(nameSpaceKV)
 	nameSpaceLog    = []byte("log")
 	logNameSpaceLen = len(nameSpaceLog) + 8
-	ErrKeyNotFound  = errors.New("not found")
-	ErrKeyIsNil     = errors.New("key is nil")
-	ErrValueIsNil   = errors.New("value is nil")
-	ErrRange        = errors.New("from must no bigger than to")
+
+	ErrKeyIsNil   = errors.New("key is nil")
+	ErrValueIsNil = errors.New("value is nil")
+	ErrRange      = errors.New("from must no bigger than to")
 )
 
 // ParseLogKey parses the index from the key bytes.
@@ -48,19 +50,25 @@ type Store struct {
 	db *badger.DB
 }
 
-func NewStore(path string, inMemory bool) (*Store, error) {
-	opt := func(path string) badger.Options {
-		if inMemory {
-			return badger.DefaultOptions("").WithInMemory(inMemory)
-		}
-		return badger.DefaultOptions(path)
+func SimpleBadgerOptions(path string, inMemory bool) badger.Options {
+	if inMemory {
+		return badger.DefaultOptions("").WithInMemory(inMemory)
 	}
-
-	db, err := badger.Open(opt(path))
+	return badger.DefaultOptions(path)
+}
+func NewStore(opts badger.Options) (*Store, error) {
+	db, err := badger.Open(opts)
 	if err != nil {
 		return nil, err
 	}
 	store := &Store{db}
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			_ = db.RunValueLogGC(0.7)
+		}
+	}()
 	return store, nil
 }
 
@@ -69,7 +77,7 @@ func (s *Store) Get(key []byte) (val []byte, err error) {
 		item, err := txn.Get(buildKvKey(key))
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
-				return ErrKeyNotFound
+				return raft.ErrKeyNotFound
 			}
 			return err
 		}
@@ -147,7 +155,7 @@ func (s *Store) GetLog(index uint64) (log *raft.LogEntry, err error) {
 		item, err := txn.Get(buildLogKey(index))
 		if err != nil {
 			if errors.Is(err, badger.ErrKeyNotFound) {
-				return ErrKeyNotFound
+				return raft.ErrKeyNotFound
 			}
 			return err
 		}

@@ -10,7 +10,7 @@ import (
 )
 
 func TestName(t *testing.T) {
-	store, err := NewStore("test", true)
+	store, err := NewStore(SimpleBadgerOptions("test", true))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestLogRange(t *testing.T) {
 	Convey("get range", t, func() {
 		for i, tc := range testList {
 			Convey(fmt.Sprintf("case %d", i), func() {
-				store, err := NewStore("test", true)
+				store, err := NewStore(SimpleBadgerOptions("test", true))
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -109,8 +109,9 @@ func TestLogRange(t *testing.T) {
 }
 
 func TestKey(t *testing.T) {
-	key := buildLogKey(123)
-	t.Log(string(key))
+	key := buildLogKey(15)
+	t.Log(key[3:])
+	t.Log(uint2Bytes(5))
 	t.Log(parseLogKey(key))
 
 }
