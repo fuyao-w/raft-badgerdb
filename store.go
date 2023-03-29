@@ -1,12 +1,13 @@
 package raft_badgerdb
 
 import (
+	"encoding/binary"
 	"errors"
 	badger "github.com/dgraph-io/badger/v4"
-	"github.com/dgraph-io/badger/v4/y"
 	. "github.com/fuyao-w/common-util"
 	raft "github.com/fuyao-w/go-raft"
 	"github.com/vmihailenco/msgpack/v5"
+	"math"
 	"strconv"
 )
 
@@ -14,19 +15,28 @@ var (
 	nameSpaceKV     = []byte("kv")
 	kvNameSpaceLen  = len(nameSpaceKV)
 	nameSpaceLog    = []byte("log")
-	logNameSpaceLen = len(nameSpaceLog)
+	logNameSpaceLen = len(nameSpaceLog) + 8
 	ErrKeyNotFound  = errors.New("not found")
 	ErrKeyIsNil     = errors.New("key is nil")
 	ErrValueIsNil   = errors.New("value is nil")
 	ErrRange        = errors.New("from must no bigger than to")
 )
 
+// ParseLogKey parses the index from the key bytes.
+func parseLogKey(key []byte) uint64 {
+	if len(key) <= 8 {
+		return 0
+	}
+	return binary.BigEndian.Uint64(key[len(key)-8:])
+}
+
 func buildLogKey(k uint64) []byte {
-	return y.KeyWithTs(nameSpaceLog, k)
+	out := make([]byte, logNameSpaceLen)
+	copy(out, nameSpaceLog)
+	binary.BigEndian.PutUint64(out[len(nameSpaceLog):], k)
+	return out
 }
-func parseLogKey(k []byte) uint64 {
-	return y.ParseTs(k)
-}
+
 func buildKvKey(k []byte) []byte {
 	out := make([]byte, kvNameSpaceLen+len(k))
 	copy(out, nameSpaceKV)
@@ -100,8 +110,7 @@ func (s *Store) GetUint64(key []byte) (uint64, error) {
 func (s *Store) FirstIndex() (idx uint64, err error) {
 	err = s.db.View(func(txn *badger.Txn) error {
 		opts := badger.IteratorOptions{
-			Prefix:  nameSpaceLog,
-			Reverse: true,
+			Prefix: nameSpaceLog,
 		}
 		iterator := txn.NewIterator(opts)
 		defer iterator.Close()
@@ -118,11 +127,15 @@ func (s *Store) FirstIndex() (idx uint64, err error) {
 func (s *Store) LastIndex() (idx uint64, err error) {
 	err = s.db.View(func(txn *badger.Txn) error {
 		opts := badger.IteratorOptions{
-			Prefix: nameSpaceLog,
+			Prefix:  nameSpaceLog,
+			Reverse: true,
 		}
 		iterator := txn.NewIterator(opts)
 		defer iterator.Close()
-		iterator.Rewind()
+		iterator.Seek(buildLogKey(math.MaxUint64))
+		if !iterator.Valid() {
+			return nil
+		}
 		idx = parseLogKey(iterator.Item().KeyCopy(nil))
 		return nil
 	})
@@ -151,7 +164,6 @@ func (s *Store) GetLogRange(from, to uint64) (logs []*raft.LogEntry, err error) 
 	}
 	err = s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
-		opts.Reverse = true
 		opts.Prefix = nameSpaceLog
 		iterator := txn.NewIterator(opts)
 		defer iterator.Close()

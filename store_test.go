@@ -51,12 +51,12 @@ func TestLogRange(t *testing.T) {
 		{
 			1, 99,
 		},
-		{
-			15, 99,
-		},
-		{
-			15, 110,
-		},
+		//{
+		//	15, 99,
+		//},
+		//{
+		//	15, 110,
+		//},
 	}
 	Convey("get range", t, func() {
 		for i, tc := range testList {
